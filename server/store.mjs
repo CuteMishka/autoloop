@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(__dirname, "data");
-const dbPath = path.join(dataDir, "autoloop.local.json");
+const dbPath = process.env.VERCEL
+  ? path.join("/tmp", "autoloop.local.json")
+  : path.join(dataDir, "autoloop.local.json");
 const seedPath = path.join(dataDir, "seed.json");
 
 function ensureDb() {

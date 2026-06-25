@@ -507,10 +507,14 @@ app.use((error, _request, response, _next) => {
   response.status(error.status || 500).json({ message: error.message || "Ошибка сервера" });
 });
 
-initTelegram().catch((error) => {
-  console.error("Telegram bot failed to start:", error.message);
-});
+if (!process.env.VERCEL) {
+  initTelegram().catch((error) => {
+    console.error("Telegram bot failed to start:", error.message);
+  });
 
-app.listen(port, () => {
-  console.log(`Autoloop backend is running on http://127.0.0.1:${port}`);
-});
+  app.listen(port, () => {
+    console.log(`Autoloop backend is running on http://127.0.0.1:${port}`);
+  });
+}
+
+export default app;
