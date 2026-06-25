@@ -1,0 +1,37 @@
+{
+  "points": [
+    {
+      "id": "mega-aqua",
+      "code": "QR-MEGA-AQUA",
+      "name": "Mega Aqua Spa",
+      "city": "Алматы",
+      "address": "пр. Розыбакиева, 247А",
+      "pricePerTowel": 900,
+      "cleanOnShelf": 46,
+      "employees": ["Айдана", "Руслан"]
+    },
+    {
+      "id": "central-pool",
+      "code": "QR-CENTRAL-POOL",
+      "name": "Central Pool",
+      "city": "Астана",
+      "address": "ул. Кабанбай батыра, 12",
+      "pricePerTowel": 800,
+      "cleanOnShelf": 32,
+      "employees": ["Мадина", "Тимур"]
+    },
+    {
+      "id": "family-sauna",
+      "code": "QR-FAMILY-SAUNA",
+      "name": "Family Sauna",
+      "city": "Шымкент",
+      "address": "ул. Байтурсынова, 44",
+      "pricePerTowel": 700,
+      "cleanOnShelf": 58,
+      "employees": ["Аружан"]
+    }
+  ],
+  "orders": [],
+  "customers": [],
+  "verifications": []
+}
