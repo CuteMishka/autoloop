@@ -65,7 +65,15 @@ npm run build
 dist
 ```
 
-6. В Pages project добавить D1 binding:
+6. Deploy command:
+
+```text
+npm run deploy:cloudflare
+```
+
+Не ставьте `npx wrangler deploy` в Cloudflare Pages. Это команда для Workers, она падает с ошибкой `Missing entry-point to Worker script`. Если Cloudflare просит обязательную deploy-команду, используйте `npm run deploy:cloudflare`, он вызывает `npx wrangler pages deploy dist --project-name autoloop`.
+
+7. В Pages project добавить D1 binding:
 
 ```text
 Binding name: DB
@@ -126,7 +134,7 @@ npx wrangler pages secret put FREEDOMPAY_SECRET_KEY --project-name autoloop
 
 ```powershell
 npm run build
-npx wrangler pages deploy dist --project-name autoloop
+npm run deploy:cloudflare
 ```
 
 После деплоя проверить:
