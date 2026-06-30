@@ -6,28 +6,49 @@ import express from "express";
 import cors from "cors";
 import { nanoid } from "nanoid";
 import { readDb, updateDb } from "./store.mjs";
+import {
+  buildSignedXmlResponse,
+  createFreedomPayPayment,
+  getFreedomPayConfig,
+  getRequestParams,
+  getScriptNameFromRequest,
+  verifySignature
+} from "./freedompay.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = Number(process.env.PORT || 4200);
 const demoMode = process.env.TELEGRAM_DEMO_MODE !== "false";
 const token = process.env.TELEGRAM_BOT_TOKEN;
+const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET || "";
+const freedomPayConfig = getFreedomPayConfig();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 const clients = new Set();
-let botUsername = null;
+let botUsername = process.env.TELEGRAM_BOT_USERNAME || null;
 let telegramOffset = 0;
 const pendingChatCodes = new Map();
 
 const paymentProviders = [
-  { id: "kaspi", name: "Kaspi", accent: "#ef4444" },
   { id: "freedom", name: "Freedom Pay", accent: "#16a34a" },
-  { id: "apple-pay", name: "Apple Pay", accent: "#111827" },
-  { id: "google-pay", name: "Google Pay", accent: "#2563eb" },
+  { id: "kaspi", name: "Kaspi", accent: "#ef4444" },
   { id: "card", name: "Банковская карта", accent: "#7c3aed" }
 ];
+
+const legalInfo = {
+  companyName: process.env.LEGAL_COMPANY_NAME || "ИП ORIGINAL BAR",
+  bin: process.env.LEGAL_BIN || "980311451341",
+  address: process.env.LEGAL_ADDRESS || "Усть-Каменогорск Г.А., Усть-Каменогорск, УЛИЦА 30-Й ГВАРДЕЙСКОЙ ДИВИЗИИ, дом 46, кв/офис 38",
+  phone: process.env.LEGAL_PHONE || "+77711546680",
+  email: process.env.LEGAL_EMAIL || "eshenbaev@gmail.com",
+  bankAccount: process.env.LEGAL_BANK_ACCOUNT || "KZ71722S000029932182",
+  bankName: process.env.LEGAL_BANK_NAME || "АО \"Kaspi Bank\"",
+  bankBik: process.env.LEGAL_BANK_BIK || "CASPKZKA",
+  bankKbe: process.env.LEGAL_BANK_KBE || "19"
+};
 
 function normalizePhone(phone = "") {
   const digits = String(phone).replace(/\D/g, "");
@@ -47,6 +68,12 @@ function publicDb() {
       createdAt: customer.createdAt
     })),
     paymentProviders,
+    freedomPay: {
+      configured: freedomPayConfig.configured,
+      testingMode: freedomPayConfig.testingMode,
+      demoMode: freedomPayConfig.demoMode
+    },
+    legal: legalInfo,
     demoMode,
     botUsername
   };
@@ -151,14 +178,101 @@ function generatePaymentReference(provider) {
   return `${provider.id.toUpperCase().replace(/[^A-Z0-9]/g, "")}-${nanoid(8).toUpperCase()}`;
 }
 
+function getClientIp(request) {
+  return String(request.headers["x-forwarded-for"] || request.socket.remoteAddress || "")
+    .split(",")[0]
+    .trim();
+}
+
+function createOrderDraft(db, body) {
+  const verification = db.verifications.find((item) => item.id === body.verificationId);
+  if (!verification || verification.status !== "verified") {
+    const error = new Error("Сначала подтвердите номер через Telegram");
+    error.status = 403;
+    throw error;
+  }
+
+  const point = getPointOrThrow(db, body.pointId);
+  const towelCount = Math.max(1, Math.min(10, Number(body.towelCount || 1)));
+  const provider = paymentProviders.find((item) => item.id === body.providerId);
+  if (!provider) {
+    const error = new Error("Платёжный способ не найден");
+    error.status = 400;
+    throw error;
+  }
+
+  if (point.cleanOnShelf < towelCount) {
+    const error = new Error("Недостаточно чистых полотенец на точке");
+    error.status = 409;
+    throw error;
+  }
+
+  const customer = db.customers.find((item) => item.phone === verification.phone);
+  const order = {
+    id: nanoid(10),
+    receiptId: generateReceiptId(point),
+    paymentReference: generatePaymentReference(provider),
+    pointId: point.id,
+    pointName: point.name,
+    phone: verification.phone,
+    customerName: customer?.name || verification.name || "Гость",
+    towelCount,
+    amount: towelCount * point.pricePerTowel,
+    providerId: provider.id,
+    providerName: provider.name,
+    status: provider.id === "freedom" ? "pending_payment" : "paid",
+    paymentStatus: provider.id === "freedom" ? "created" : "demo_paid",
+    paymentCreatedAt: new Date().toISOString(),
+    paidAt: provider.id === "freedom" ? null : new Date().toISOString(),
+    issuedAt: null,
+    returnedAt: null
+  };
+  db.orders.unshift(order);
+  return { order, point, provider };
+}
+
+function publicOrder(order) {
+  if (!order) return null;
+  return {
+    ...order,
+    phone: order.phone ? `${String(order.phone).slice(0, 4)}***${String(order.phone).slice(-2)}` : ""
+  };
+}
+
+function updateOrderPayment(id, mutator) {
+  return updateDb((db) => {
+    const order = db.orders.find((item) => item.id === id);
+    if (!order) return null;
+    mutator(order, db);
+    return order;
+  });
+}
+
+function sendFreedomXml(response, request, params) {
+  const xml = buildSignedXmlResponse(getScriptNameFromRequest(request), params, freedomPayConfig.secretKey);
+  response.type("application/xml; charset=utf-8").send(xml);
+}
+
+function redirectToPaymentPage(response, request, status) {
+  const params = getRequestParams(request);
+  const orderId = params.pg_order_id || "";
+  const paymentId = params.pg_payment_id || "";
+  const query = new URLSearchParams({
+    status,
+    orderId: String(orderId),
+    paymentId: String(paymentId)
+  });
+
+  response.redirect(`/#/payment/${status}?${query.toString()}`);
+}
+
 async function initTelegram() {
   if (!token) {
     console.log("Telegram bot token is not configured. Demo verification mode is available.");
     return;
   }
 
-  const me = await telegram("getMe");
-  botUsername = me.result.username;
+  await ensureBotUsername();
   console.log(`Telegram bot connected as @${botUsername}`);
   pollTelegram();
 }
@@ -174,6 +288,19 @@ async function telegram(method, payload = {}) {
     throw new Error(json.description || `Telegram ${method} failed`);
   }
   return json;
+}
+
+async function ensureBotUsername() {
+  if (!token || botUsername) return botUsername;
+
+  try {
+    const me = await telegram("getMe");
+    botUsername = me.result.username;
+  } catch (error) {
+    console.error("Telegram getMe failed:", error.message);
+  }
+
+  return botUsername;
 }
 
 async function pollTelegram() {
@@ -198,22 +325,54 @@ async function pollTelegram() {
   }
 }
 
+function isVerificationExpired(verification) {
+  return verification.expiresAt && new Date(verification.expiresAt).getTime() < Date.now();
+}
+
+function contactKeyboard() {
+  return {
+    resize_keyboard: true,
+    one_time_keyboard: true,
+    keyboard: [[{ text: "Отправить номер", request_contact: true }]]
+  };
+}
+
+function linkTelegramCode(code, message) {
+  const chatId = String(message.chat.id);
+  const userId = message.from?.id ? String(message.from.id) : "";
+
+  return updateDb((db) => {
+    const verification = db.verifications.find((item) => {
+      return item.code === code && item.status === "pending" && !isVerificationExpired(item);
+    });
+
+    if (!verification) {
+      return { ok: false, reason: "Код не найден или устарел" };
+    }
+
+    verification.telegramChatId = chatId;
+    verification.telegramUserId = userId;
+    verification.telegramLinkedAt = new Date().toISOString();
+    return { ok: true, verification };
+  });
+}
+
 async function handleTelegramMessage(message) {
-  const chatId = message.chat.id;
+  const chatId = String(message.chat.id);
+  const userId = message.from?.id ? String(message.from.id) : "";
   const text = message.text?.trim();
 
   if (text?.startsWith("/start")) {
     const [, code] = text.split(" ");
     if (code) {
       pendingChatCodes.set(chatId, code);
+      const result = linkTelegramCode(code, message);
       await telegram("sendMessage", {
         chat_id: chatId,
-        text: "Код принят. Теперь отправьте контакт кнопкой ниже, чтобы подтвердить номер для аренды.",
-        reply_markup: {
-          resize_keyboard: true,
-          one_time_keyboard: true,
-          keyboard: [[{ text: "Отправить номер", request_contact: true }]]
-        }
+        text: result.ok
+          ? "Код принят. Теперь отправьте контакт кнопкой ниже, чтобы подтвердить номер для аренды."
+          : result.reason,
+        reply_markup: result.ok ? contactKeyboard() : { remove_keyboard: true }
       });
       return;
     }
@@ -221,28 +380,40 @@ async function handleTelegramMessage(message) {
 
   if (/^\d{6}$/.test(text || "")) {
     pendingChatCodes.set(chatId, text);
+    const result = linkTelegramCode(text, message);
     await telegram("sendMessage", {
       chat_id: chatId,
-      text: "Отлично. Теперь отправьте контакт кнопкой ниже.",
-      reply_markup: {
-        resize_keyboard: true,
-        one_time_keyboard: true,
-        keyboard: [[{ text: "Отправить номер", request_contact: true }]]
-      }
+      text: result.ok ? "Отлично. Теперь отправьте контакт кнопкой ниже." : result.reason,
+      reply_markup: result.ok ? contactKeyboard() : { remove_keyboard: true }
     });
     return;
   }
 
   if (message.contact) {
+    if (message.contact.user_id && userId && String(message.contact.user_id) !== userId) {
+      await telegram("sendMessage", {
+        chat_id: chatId,
+        text: "Отправьте именно свой контакт через кнопку Telegram, не пересланный номер."
+      });
+      return;
+    }
+
     const code = pendingChatCodes.get(chatId);
     const phone = normalizePhone(message.contact.phone_number);
     const result = updateDb((db) => {
-      const verification = db.verifications.find((item) => item.code === code && item.status === "pending");
+      const verification = db.verifications.find((item) => {
+        if (item.status !== "pending" || isVerificationExpired(item)) return false;
+        if (code && item.code === code) return true;
+        if (String(item.telegramChatId || "") !== chatId) return false;
+        return !item.telegramUserId || !userId || String(item.telegramUserId) === userId;
+      });
       if (!verification) return { ok: false, reason: "Код не найден или устарел" };
       if (verification.phone !== phone) return { ok: false, reason: "Номер Telegram не совпал с номером на сайте" };
 
       verification.status = "verified";
       verification.chatId = chatId;
+      verification.telegramChatId = chatId;
+      verification.telegramUserId = userId;
       verification.verifiedAt = new Date().toISOString();
 
       let customer = db.customers.find((item) => item.phone === phone);
@@ -281,6 +452,28 @@ app.get("/api/config", (_request, response) => {
   response.json(publicDb());
 });
 
+app.post("/api/telegram/webhook", async (request, response) => {
+  if (!token) {
+    response.status(503).json({ message: "Telegram bot token is not configured" });
+    return;
+  }
+
+  if (webhookSecret && request.get("X-Telegram-Bot-Api-Secret-Token") !== webhookSecret) {
+    response.status(401).send("Invalid Telegram webhook secret");
+    return;
+  }
+
+  try {
+    if (request.body?.message) {
+      await handleTelegramMessage(request.body.message);
+    }
+    response.json({ ok: true });
+  } catch (error) {
+    console.error("Telegram webhook error:", error.message);
+    response.json({ ok: false });
+  }
+});
+
 app.get("/api/events", (request, response) => {
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -292,7 +485,7 @@ app.get("/api/events", (request, response) => {
   request.on("close", () => clients.delete(response));
 });
 
-app.post("/api/auth/request", (request, response) => {
+app.post("/api/auth/request", async (request, response) => {
   const phone = normalizePhone(request.body.phone);
   const name = String(request.body.name || "").trim();
 
@@ -318,11 +511,13 @@ app.post("/api/auth/request", (request, response) => {
     return item;
   });
 
+  const username = await ensureBotUsername();
+
   response.json({
     verificationId: verification.id,
     code: verification.code,
-    botUsername,
-    botLink: botUsername ? `https://t.me/${botUsername}?start=${verification.code}` : null,
+    botUsername: username,
+    botLink: username ? `https://t.me/${username}?start=${verification.code}` : null,
     demoMode
   });
 });
@@ -372,58 +567,207 @@ app.post("/api/auth/demo-verify", (request, response) => {
   response.json({ ok: true });
 });
 
-app.post("/api/orders", (request, response) => {
+app.post("/api/orders", async (request, response) => {
   try {
+    if (
+      request.body.providerId === "freedom"
+      && !freedomPayConfig.configured
+      && !freedomPayConfig.demoMode
+    ) {
+      throw Object.assign(new Error("FreedomPay не настроен: добавьте MID и secret key"), { status: 503 });
+    }
+
     const result = updateDb((db) => {
-      const verification = db.verifications.find((item) => item.id === request.body.verificationId);
-      if (!verification || verification.status !== "verified") {
-        const error = new Error("Сначала подтвердите номер через Telegram");
-        error.status = 403;
-        throw error;
-      }
-
-      const point = getPointOrThrow(db, request.body.pointId);
-      const towelCount = Math.max(1, Math.min(10, Number(request.body.towelCount || 1)));
-      const provider = paymentProviders.find((item) => item.id === request.body.providerId);
-      if (!provider) {
-        const error = new Error("Платёжный способ не найден");
-        error.status = 400;
-        throw error;
-      }
-
-      if (point.cleanOnShelf < towelCount) {
-        const error = new Error("Недостаточно чистых полотенец на точке");
-        error.status = 409;
-        throw error;
-      }
-
-      const customer = db.customers.find((item) => item.phone === verification.phone);
-      const order = {
-        id: nanoid(10),
-        receiptId: generateReceiptId(point),
-        paymentReference: generatePaymentReference(provider),
-        pointId: point.id,
-        pointName: point.name,
-        phone: verification.phone,
-        customerName: customer?.name || verification.name || "Гость",
-        towelCount,
-        amount: towelCount * point.pricePerTowel,
-        providerId: provider.id,
-        providerName: provider.name,
-        status: "paid",
-        paidAt: new Date().toISOString(),
-        issuedAt: null,
-        returnedAt: null
-      };
-      db.orders.unshift(order);
-      return order;
+      return createOrderDraft(db, {
+        ...request.body,
+        clientIp: getClientIp(request)
+      });
     });
 
-    broadcast("order.created", result);
-    response.status(201).json(result);
+    if (result.provider.id !== "freedom") {
+      broadcast("order.created", result.order);
+      response.status(201).json(publicOrder(result.order));
+      return;
+    }
+
+    if (!freedomPayConfig.configured) {
+      const demoOrder = updateOrderPayment(result.order.id, (order) => {
+        order.status = "paid";
+        order.paymentStatus = "demo_paid";
+        order.paidAt = new Date().toISOString();
+      });
+      broadcast("order.created", demoOrder);
+      response.status(201).json(publicOrder(demoOrder));
+      return;
+    }
+
+    try {
+      const freedomPayment = await createFreedomPayPayment(result.order, result.point, freedomPayConfig);
+      const updated = updateOrderPayment(result.order.id, (order) => {
+        order.paymentStatus = "redirect_created";
+        order.paymentRedirectUrl = freedomPayment.pg_redirect_url;
+        order.freedomPaymentId = freedomPayment.pg_payment_id || null;
+        order.freedomPayCreatedAt = new Date().toISOString();
+      });
+      broadcast("order.created", updated);
+      response.status(201).json({
+        ...publicOrder(updated),
+        payment: {
+          provider: "freedom",
+          redirectUrl: freedomPayment.pg_redirect_url,
+          paymentId: freedomPayment.pg_payment_id || null
+        }
+      });
+    } catch (paymentError) {
+      updateOrderPayment(result.order.id, (order) => {
+        order.status = "payment_failed";
+        order.paymentStatus = "create_failed";
+        order.paymentError = paymentError.message;
+      });
+      throw Object.assign(paymentError, { status: 502 });
+    }
   } catch (error) {
     response.status(error.status || 500).json({ message: error.message });
   }
+});
+
+app.get("/api/orders/:id", (request, response) => {
+  const db = readDb();
+  const order = db.orders.find((item) => item.id === request.params.id);
+  if (!order) {
+    response.status(404).json({ message: "Заказ не найден" });
+    return;
+  }
+  response.json(publicOrder(order));
+});
+
+app.all("/api/payments/freedom/check", (request, response) => {
+  const params = getRequestParams(request);
+  if (!verifySignature(getScriptNameFromRequest(request), params, freedomPayConfig.secretKey)) {
+    response.status(400).send("Invalid signature");
+    return;
+  }
+
+  const db = readDb();
+  const order = db.orders.find((item) => item.id === params.pg_order_id);
+  const amountMatches = order && Number(order.amount).toFixed(2) === Number(params.pg_amount).toFixed(2);
+  const canPay = order
+    && order.providerId === "freedom"
+    && amountMatches
+    && ["pending_payment", "paid"].includes(order.status);
+
+  sendFreedomXml(response, request, {
+    pg_status: canPay ? "ok" : "rejected",
+    pg_description: canPay ? "Платеж разрешен" : "Заказ недоступен для оплаты"
+  });
+});
+
+app.all("/api/payments/freedom/result", (request, response) => {
+  const params = getRequestParams(request);
+  if (!verifySignature(getScriptNameFromRequest(request), params, freedomPayConfig.secretKey)) {
+    response.status(400).send("Invalid signature");
+    return;
+  }
+
+  const result = updateDb((db) => {
+    const order = db.orders.find((item) => item.id === params.pg_order_id);
+    if (!order) {
+      return {
+        response: {
+          pg_status: "rejected",
+          pg_description: "Заказ не найден"
+        },
+        order: null,
+        changed: false
+      };
+    }
+
+    if (order.freedomResultResponse) {
+      return {
+        response: order.freedomResultResponse,
+        order,
+        changed: false
+      };
+    }
+
+    const amountMatches = Number(order.amount).toFixed(2) === Number(params.pg_amount).toFixed(2);
+    if (!amountMatches || order.providerId !== "freedom") {
+      order.freedomResultResponse = {
+        pg_status: params.pg_can_reject === "1" ? "rejected" : "ok",
+        pg_description: "Параметры платежа не совпадают с заказом"
+      };
+      order.paymentStatus = "result_mismatch";
+      order.paymentError = order.freedomResultResponse.pg_description;
+      return {
+        response: order.freedomResultResponse,
+        order,
+        changed: true
+      };
+    }
+
+    const paid = String(params.pg_result) === "1";
+    order.freedomPaymentId = params.pg_payment_id || order.freedomPaymentId || null;
+    order.freedomResult = {
+      result: params.pg_result || null,
+      paymentId: params.pg_payment_id || null,
+      amount: params.pg_amount || null,
+      currency: params.pg_currency || null,
+      paymentDate: params.pg_payment_date || null,
+      testingMode: params.pg_testing_mode || null,
+      receivedAt: new Date().toISOString()
+    };
+
+    if (paid) {
+      order.status = "paid";
+      order.paymentStatus = "paid";
+      order.paidAt = order.paidAt || new Date().toISOString();
+      order.freedomResultResponse = {
+        pg_status: "ok",
+        pg_description: "Order paid"
+      };
+    } else {
+      order.status = "payment_failed";
+      order.paymentStatus = "failed";
+      order.paymentError = params.pg_failure_description
+        || params.pg_error_description
+        || params.pg_description
+        || "Платеж не завершен";
+      order.freedomResultResponse = {
+        pg_status: "ok",
+        pg_description: "Payment result saved"
+      };
+    }
+
+    return {
+      response: order.freedomResultResponse,
+      order,
+      changed: true
+    };
+  });
+
+  if (result?.changed && result.order) {
+    broadcast("order.updated", result.order);
+  }
+
+  sendFreedomXml(response, request, result.response);
+});
+
+app.get("/api/payments/freedom/success", (request, response) => {
+  const params = getRequestParams(request);
+  if (params.pg_sig && !verifySignature(getScriptNameFromRequest(request), params, freedomPayConfig.secretKey)) {
+    response.redirect("/#/payment/failure?status=failure&reason=signature");
+    return;
+  }
+  redirectToPaymentPage(response, request, "success");
+});
+
+app.get("/api/payments/freedom/failure", (request, response) => {
+  const params = getRequestParams(request);
+  if (params.pg_sig && !verifySignature(getScriptNameFromRequest(request), params, freedomPayConfig.secretKey)) {
+    response.redirect("/#/payment/failure?status=failure&reason=signature");
+    return;
+  }
+  redirectToPaymentPage(response, request, "failure");
 });
 
 app.post("/api/orders/:id/issue", (request, response) => {

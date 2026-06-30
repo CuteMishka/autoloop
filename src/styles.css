@@ -878,6 +878,206 @@ textarea::placeholder {
   opacity: 0.82;
 }
 
+/* ----- Payment Return & Compliance ----- */
+.return-panel {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  padding: 36px 18px;
+  text-align: center;
+}
+
+.return-panel h1 {
+  color: var(--text-primary);
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.return-panel p {
+  max-width: 340px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.return-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.return-icon.failed {
+  background: rgba(220, 38, 38, 0.09);
+  color: var(--danger);
+}
+
+.return-progress {
+  width: 100%;
+  max-width: 260px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.return-progress::after {
+  content: '';
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: progressSlide 1.2s ease-in-out infinite;
+}
+
+@keyframes progressSlide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(260%); }
+}
+
+.compliance-footer {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.payment-brands {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.payment-brands span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.brand-visa {
+  color: #1a1f71;
+}
+
+.brand-mastercard {
+  color: #eb001b;
+}
+
+.compliance-links {
+  display: flex;
+  justify-content: center;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.compliance-links a,
+.secondary-link {
+  color: var(--accent-dim);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.compliance-footer p {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* ----- Legal Pages ----- */
+.legal-page {
+  min-height: 100vh;
+  padding: 28px 16px 80px;
+}
+
+.legal-shell {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.legal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.legal-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px;
+  margin-bottom: 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.legal-tabs a {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.legal-tabs a.active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.legal-card {
+  display: grid;
+  gap: 18px;
+  padding: 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 4px 34px rgba(0, 0, 0, 0.04);
+}
+
+.legal-card h1 {
+  color: var(--text-primary);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.12;
+}
+
+.legal-card section {
+  display: grid;
+  gap: 6px;
+}
+
+.legal-card h2 {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.legal-card p {
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
 /* ----- Error ----- */
 .error-text {
   color: var(--danger);
@@ -1327,6 +1527,24 @@ img {
     padding: 16px 12px 90px;
   }
 
+  .legal-page {
+    padding: 18px 12px 70px;
+  }
+
+  .legal-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .legal-card {
+    padding: 22px;
+    border-radius: 14px;
+  }
+
+  .legal-card h1 {
+    font-size: 26px;
+  }
+
   .total-line strong {
     font-size: 20px;
   }
@@ -1486,6 +1704,18 @@ img {
   .admin-page,
   .owner-page {
     padding: 14px 10px 90px;
+  }
+
+  .legal-card {
+    padding: 18px;
+  }
+
+  .legal-card h1 {
+    font-size: 23px;
+  }
+
+  .compliance-links {
+    gap: 8px 10px;
   }
 
   .order-item {

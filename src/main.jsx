@@ -25,6 +25,18 @@ const copy = {
     time: "Время", date: "Дата", receipt: "Чек", receiptNo: "Чек №",
     transaction: "Транзакция", customer: "Клиент", status: "Статус",
     paidNote: "Покажите этот чек администратору.",
+    redirecting: "Открываем страницу оплаты...",
+    paymentWait: "Ожидаем подтверждение оплаты",
+    paymentWaitNote: "FreedomPay уже возвращает результат. Страница обновится автоматически.",
+    paymentFailed: "Оплата не завершена",
+    paymentFailedNote: "Можно вернуться к заказу и попробовать оплатить снова.",
+    returnToRent: "Вернуться к аренде",
+    legalOffer: "Оферта",
+    legalPrivacy: "Политика конфиденциальности",
+    legalPayment: "Оплата и возврат",
+    legalCompany: "Реквизиты",
+    contacts: "Контакты",
+    paymentSystems: "VISA / Mastercard",
     error: "Ошибка",
     admin: "Админ", monitoring: "Мониторинг", issueReturn: "Выдача / Возврат",
     inventory: "Инвентарь", issue: "Выдать", return: "Вернуть",
@@ -49,6 +61,18 @@ const copy = {
     time: "Уақыт", date: "Күні", receipt: "Чек", receiptNo: "Чек №",
     transaction: "Транзакция", customer: "Клиент", status: "Статус",
     paidNote: "Осы чекті әкімшіге көрсетіңіз.",
+    redirecting: "Төлем парағын ашып жатырмыз...",
+    paymentWait: "Төлем расталуын күтеміз",
+    paymentWaitNote: "FreedomPay нәтижені жіберіп жатыр. Парақ автоматты түрде жаңарады.",
+    paymentFailed: "Төлем аяқталмады",
+    paymentFailedNote: "Тапсырысқа оралып, қайта төлеп көруге болады.",
+    returnToRent: "Жалға алуға оралу",
+    legalOffer: "Оферта",
+    legalPrivacy: "Құпиялылық саясаты",
+    legalPayment: "Төлем және қайтару",
+    legalCompany: "Деректемелер",
+    contacts: "Байланыс",
+    paymentSystems: "VISA / Mastercard",
     error: "Қате",
     admin: "Админ", monitoring: "Мониторинг", issueReturn: "Беру / Қайтару",
     inventory: "Инвентарь", issue: "Беру", return: "Қайтару",
@@ -73,6 +97,18 @@ const copy = {
     time: "Time", date: "Date", receipt: "Receipt", receiptNo: "Receipt #",
     transaction: "Transaction", customer: "Customer", status: "Status",
     paidNote: "Show this receipt to the administrator.",
+    redirecting: "Opening payment page...",
+    paymentWait: "Waiting for payment confirmation",
+    paymentWaitNote: "FreedomPay is sending the result. This page refreshes automatically.",
+    paymentFailed: "Payment was not completed",
+    paymentFailedNote: "You can return to the order and try again.",
+    returnToRent: "Back to rental",
+    legalOffer: "Offer",
+    legalPrivacy: "Privacy policy",
+    legalPayment: "Payment and returns",
+    legalCompany: "Company details",
+    contacts: "Contacts",
+    paymentSystems: "VISA / Mastercard",
     error: "Error",
     admin: "Admin", monitoring: "Monitoring", issueReturn: "Issue / Return",
     inventory: "Inventory", issue: "Issue", return: "Return",
@@ -130,6 +166,11 @@ function useHash() {
     return () => window.removeEventListener("hashchange", handler);
   }, []);
   return hash;
+}
+
+function splitRoute(route) {
+  const [path, query = ""] = route.split("?");
+  return { path, query: new URLSearchParams(query) };
 }
 
 /* ─── animation variants ─── */
@@ -276,6 +317,7 @@ function App() {
   }
 
   const route = hash.replace("#", "") || "/";
+  const { path: routePath } = splitRoute(route);
   const qrCode = window.location.pathname.match(/^\/q\/([^/]+)/)?.[1];
 
   return (
@@ -283,13 +325,21 @@ function App() {
       <InteractiveBackground />
       <div className="app-shell">
         <AnimatePresence mode="wait">
-          {route.startsWith("/admin") ? (
+          {routePath.startsWith("/admin") ? (
             <motion.div key="admin" {...fadeUp} transition={{ duration: 0.35 }}>
               <AdminPanel data={data} text={text} lang={lang} setLang={setLang} />
             </motion.div>
-          ) : route.startsWith("/owner") ? (
+          ) : routePath.startsWith("/owner") ? (
             <motion.div key="owner" {...fadeUp} transition={{ duration: 0.35 }}>
               <OwnerPanel data={data} text={text} lang={lang} setLang={setLang} />
+            </motion.div>
+          ) : routePath.startsWith("/payment/") ? (
+            <motion.div key="payment-return" {...fadeUp} transition={{ duration: 0.35 }}>
+              <PaymentReturnPage data={data} route={route} text={text} />
+            </motion.div>
+          ) : routePath.startsWith("/legal/") ? (
+            <motion.div key="legal" {...fadeUp} transition={{ duration: 0.35 }}>
+              <LegalPage data={data} route={routePath} text={text} />
             </motion.div>
           ) : (
             <motion.div key="client" {...fadeUp} transition={{ duration: 0.35 }}>
@@ -324,6 +374,7 @@ function ClientPage({ data, qrCode, text, lang, setLang }) {
           </div>
         </header>
         <ClientFlow data={data} qrCode={qrCode} text={text} />
+        <ComplianceFooter data={data} text={text} />
       </section>
     </main>
   );
@@ -341,9 +392,10 @@ function ClientFlow({ data, qrCode, text }) {
   const [verification, setVerification] = useState(null);
   const [verified, setVerified] = useState(false);
   const [count, setCount] = useState(1);
-  const [provider, setProvider] = useState("kaspi");
+  const [provider, setProvider] = useState("freedom");
   const [order, setOrder] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
   const [error, setError] = useState("");
 
   const total = count * (point?.pricePerTowel || 0);
@@ -383,6 +435,11 @@ function ClientFlow({ data, qrCode, text }) {
         method: "POST",
         body: JSON.stringify({ pointId: point.id, towelCount: count, providerId: provider, verificationId: verification.verificationId })
       });
+      if (payload.payment?.redirectUrl) {
+        setRedirecting(true);
+        window.location.assign(payload.payment.redirectUrl);
+        return;
+      }
       setOrder(payload);
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
@@ -546,7 +603,7 @@ function ClientFlow({ data, qrCode, text }) {
 
             <MButton className="primary-action" onClick={pay} disabled={busy}>
               <ShieldCheck size={18} />
-              {text.pay}
+              {redirecting ? text.redirecting : text.pay}
             </MButton>
           </motion.section>
         )}
@@ -615,7 +672,7 @@ function PaidTicket({ order, point, text }) {
         <span>{text.transaction}</span>
         <strong>{paymentReference}</strong>
         <span>{text.location}</span>
-        <strong>{point.name}</strong>
+        <strong>{point?.name || order.pointName}</strong>
         <span>{text.customer}</span>
         <strong>{order.customerName}</strong>
         <span>{text.towels}</span>
@@ -641,6 +698,171 @@ function PaidTicket({ order, point, text }) {
 
       <small>{text.paidNote}</small>
     </section>
+  );
+}
+
+function PaymentReturnPage({ data, route, text }) {
+  const { path, query } = splitRoute(route);
+  const orderId = query.get("orderId");
+  const routeStatus = query.get("status") || (path.includes("failure") ? "failure" : "success");
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(Boolean(orderId));
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!orderId) return undefined;
+    let timer = null;
+    let attempts = 0;
+    let stopped = false;
+
+    const loadOrder = async () => {
+      try {
+        const payload = await api(`/api/orders/${orderId}`);
+        if (stopped) return;
+        setOrder(payload);
+        attempts += 1;
+        if (payload.status === "pending_payment" && attempts < 12) {
+          timer = setTimeout(loadOrder, 2000);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        if (!stopped) {
+          setError(err.message);
+          setLoading(false);
+        }
+      }
+    };
+
+    loadOrder();
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [orderId]);
+
+  const point = data.points?.find((item) => item.id === order?.pointId) || { name: order?.pointName || "" };
+  const isPaid = order?.status === "paid";
+  const failed = routeStatus === "failure" || order?.status === "payment_failed";
+
+  return (
+    <main className="client-page">
+      <section className="client-card">
+        <header className="client-header">
+          <SoftLoopLogo />
+        </header>
+
+        {isPaid ? (
+          <PaidTicket order={order} point={point} text={text} />
+        ) : (
+          <section className="return-panel">
+            <div className={`return-icon ${failed ? "failed" : ""}`}>
+              {failed ? <CreditCard size={26} /> : <RefreshCcw size={26} />}
+            </div>
+            <h1>{failed ? text.paymentFailed : text.paymentWait}</h1>
+            <p>{error || (failed ? text.paymentFailedNote : text.paymentWaitNote)}</p>
+            {loading && <div className="return-progress" aria-hidden="true" />}
+            <a className="secondary-action" href="#/">{text.returnToRent}</a>
+          </section>
+        )}
+
+        <ComplianceFooter data={data} text={text} />
+      </section>
+    </main>
+  );
+}
+
+function ComplianceFooter({ data, text }) {
+  const legal = data.legal || {};
+
+  return (
+    <footer className="compliance-footer">
+      <div className="payment-brands" aria-label={text.paymentSystems}>
+        <span className="brand-visa">VISA</span>
+        <span className="brand-mastercard">Mastercard</span>
+      </div>
+      <nav className="compliance-links">
+        <a href="#/legal/offer">{text.legalOffer}</a>
+        <a href="#/legal/privacy">{text.legalPrivacy}</a>
+        <a href="#/legal/payment">{text.legalPayment}</a>
+        <a href="#/legal/company">{text.legalCompany}</a>
+      </nav>
+      <p>{legal.companyName} · {legal.phone} · {legal.email}</p>
+    </footer>
+  );
+}
+
+function LegalPage({ data, route, text }) {
+  const legal = data.legal || {};
+  const section = route.split("/").filter(Boolean).pop() || "offer";
+  const titles = {
+    offer: text.legalOffer,
+    privacy: text.legalPrivacy,
+    payment: text.legalPayment,
+    company: text.legalCompany
+  };
+
+  const content = {
+    offer: [
+      ["Предмет", `${legal.companyName} предоставляет услугу краткосрочной аренды полотенец в партнерских точках SoftLoop. Заказ оформляется на сайте после подтверждения телефона.`],
+      ["Стоимость", "Цена услуги отображается до оплаты и указывается в тенге. Итоговая сумма зависит от количества выбранных полотенец."],
+      ["Порядок оказания услуги", "После успешной оплаты клиент показывает чек администратору точки, получает полотенца и возвращает их по правилам выбранной точки."],
+      ["Акцепт", "Нажатие кнопки оплаты и успешная оплата означают согласие клиента с условиями настоящей оферты."]
+    ],
+    privacy: [
+      ["Данные", "Мы обрабатываем имя, телефон, данные Telegram-подтверждения, параметры заказа и технические данные, необходимые для безопасности платежа."],
+      ["Платежи", `Оплата банковскими картами проводится на стороне FreedomPay. ${legal.companyName} не получает и не хранит номер карты, CVV/CVC и 3-D Secure данные.`],
+      ["Цель обработки", "Данные используются для подтверждения клиента, выдачи услуги, поддержки, возвратов и выполнения требований платежного партнера."],
+      ["Контакт", `По вопросам персональных данных можно написать на ${legal.email}.`]
+    ],
+    payment: [
+      ["Способы оплаты", "К оплате принимаются банковские карты Visa и Mastercard через FreedomPay. Для новых мерчантов FreedomPay прием карт может быть ограничен картами, выпущенными в Казахстане."],
+      ["Процедура оплаты", "Клиент выбирает точку, количество полотенец, подтверждает телефон и переходит на защищенную страницу FreedomPay. После оплаты сайт получает Result URL и формирует чек."],
+      ["Возврат", "Для возврата оплаты обратитесь в поддержку с номером чека, суммой и причиной. Возврат выполняется после проверки факта оплаты и условий оказания услуги."],
+      ["Сроки", "Срок фактического зачисления возврата зависит от банка-эмитента карты и правил платежной системы."]
+    ],
+    company: [
+      ["Компания", legal.companyName],
+      ["ИИН/БИН", legal.bin],
+      ["Юридический адрес", legal.address],
+      ["Телефон", legal.phone],
+      ["Email", legal.email],
+      ["Банк", legal.bankName],
+      ["Расчетный счет", legal.bankAccount],
+      ["БИК", legal.bankBik],
+      ["КБе", legal.bankKbe]
+    ]
+  };
+
+  return (
+    <main className="legal-page">
+      <section className="legal-shell">
+        <header className="legal-header">
+          <a href="#/" aria-label="SoftLoop">
+            <SoftLoopLogo />
+          </a>
+          <a className="secondary-link" href="#/">{text.returnToRent}</a>
+        </header>
+
+        <div className="legal-tabs">
+          {Object.entries(titles).map(([key, label]) => (
+            <a key={key} className={section === key ? "active" : ""} href={`#/legal/${key}`}>
+              {label}
+            </a>
+          ))}
+        </div>
+
+        <article className="legal-card">
+          <h1>{titles[section] || text.legalOffer}</h1>
+          {(content[section] || content.offer).map(([label, body]) => (
+            <section key={label}>
+              <h2>{label}</h2>
+              <p>{body}</p>
+            </section>
+          ))}
+        </article>
+      </section>
+    </main>
   );
 }
 

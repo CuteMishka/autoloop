@@ -1,0 +1,24 @@
+name = "autoloop"
+compatibility_date = "2026-06-30"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "autoloop"
+database_id = "replace-with-cloudflare-d1-database-id"
+
+[vars]
+TELEGRAM_BOT_USERNAME = "autoloop_bot"
+TELEGRAM_DEMO_MODE = "false"
+FREEDOMPAY_API_URL = "https://api.freedompay.kz"
+FREEDOMPAY_TESTING_MODE = "true"
+FREEDOMPAY_DEMO_MODE = "true"
+LEGAL_COMPANY_NAME = "ИП ORIGINAL BAR"
+LEGAL_BIN = "980311451341"
+LEGAL_ADDRESS = "Усть-Каменогорск Г.А., Усть-Каменогорск, УЛИЦА 30-Й ГВАРДЕЙСКОЙ ДИВИЗИИ, дом 46, кв/офис 38"
+LEGAL_PHONE = "+77711546680"
+LEGAL_EMAIL = "eshenbaev@gmail.com"
+LEGAL_BANK_ACCOUNT = "KZ71722S000029932182"
+LEGAL_BANK_NAME = "АО \"Kaspi Bank\""
+LEGAL_BANK_BIK = "CASPKZKA"
+LEGAL_BANK_KBE = "19"
