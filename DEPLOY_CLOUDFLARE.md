@@ -71,7 +71,7 @@ dist
 npm run deploy:cloudflare
 ```
 
-Не ставьте `npx wrangler deploy` в Cloudflare Pages. Это команда для Workers, она падает с ошибкой `Missing entry-point to Worker script`. Если Cloudflare просит обязательную deploy-команду, используйте `npm run deploy:cloudflare`, он вызывает `npx wrangler pages deploy dist --project-name autoloop`.
+Не ставьте `npx wrangler deploy` или `npx wrangler pages deploy ...` в Cloudflare Pages build settings. Git-based Pages сам публикует `dist` после успешной сборки. Если Cloudflare просит обязательную deploy-команду, используйте `npm run deploy:cloudflare`: это безопасная no-op команда, которая просто завершается успешно.
 
 7. В Pages project добавить D1 binding:
 
@@ -130,11 +130,40 @@ npx wrangler pages secret put FREEDOMPAY_SECRET_KEY --project-name autoloop
 
 Через Dashboard достаточно push в GitHub.
 
+Если вы деплоите вручную со своего компьютера через Wrangler, добавьте локальный `CLOUDFLARE_API_TOKEN` с правильными правами. Для обычного Git-based Cloudflare Pages deploy этот токен не нужен.
+
+Создать токен:
+
+1. Cloudflare Dashboard -> My Profile -> API Tokens -> Create Token.
+2. Custom token.
+3. Permissions:
+
+```text
+Account -> Cloudflare Pages -> Edit
+Account -> D1 -> Edit
+User -> Memberships -> Read
+```
+
+4. Account Resources:
+
+```text
+Include -> Madiishka3@gmail.com's Account
+```
+
+5. В Pages project -> Settings -> Environment variables добавить:
+
+```env
+CLOUDFLARE_API_TOKEN=<созданный токен>
+CLOUDFLARE_ACCOUNT_ID=63bef16c23f94f06c39bf86796a8fcb6
+```
+
+Если `CLOUDFLARE_API_TOKEN` уже есть, замените его новым. Роль аккаунта `Super Administrator` сама по себе не помогает, если сам API token создан без `Cloudflare Pages: Edit`.
+
 Для ручного deploy:
 
 ```powershell
 npm run build
-npm run deploy:cloudflare
+npx wrangler pages deploy dist --project-name autoloop
 ```
 
 После деплоя проверить:
